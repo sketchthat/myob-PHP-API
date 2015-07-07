@@ -1,0 +1,31 @@
+{
+    "name": "sketchthat/myob-PHP-API",
+    "type": "library",
+    "description": "An easy-to-use PHP Class for connecting with MYOB AccountRight v2.",
+    "keywords": ["myob", "accountright", "account", "right", "php"],
+    "homepage": "https://github.com/sketchthat/myob-PHP-API",
+    "license": "GNU",
+    "authors": [
+        {
+            "name": "Michael Kimpton",
+            "email": "mike@sketchthat.com",
+            "homepage": "http://www.sketchthat.com"
+        }
+    ],
+    "require": {
+        "php": ">=5.3.0",
+        "ext-curl": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "MYOB\\AccountRightV2\\": "src"
+        }
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-master": "1.0-dev"
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
