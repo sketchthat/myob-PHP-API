@@ -87,6 +87,13 @@ class AccountRightV2 {
     private $_password;
 
     /**
+     * The location of a saved object.
+     *
+     * @var string
+     */
+    private $_location;
+
+    /**
      *  The API Methods.
      */
     const GET = 0;
@@ -159,9 +166,14 @@ class AccountRightV2 {
 
         $json = $this->_makeRequest(self::API_TOKEN_URL, $params);
 
-        return $this->saveAccessToken(json_decode($json));
+        return $this->saveAccessToken($json);
     }
 
+    /**
+     * Refreshes Access Token from MYOB.
+     *
+     * @return string MYOB Access Token
+     */
     public function refreshToken($refreshToken) {
         $params = array(
             'client_id' => $this->_apikey,
@@ -172,10 +184,21 @@ class AccountRightV2 {
 
         $json = $this->_makeRequest(self::API_TOKEN_URL, $params);
 
-        return $this->saveAccessToken(json_decode($json));
+        return $this->saveAccessToken($json);
     }
 
+    /**
+     * Saves the Access Token from MYOB in Sessions
+     *
+     * @return json Access Token
+     */
     public function saveAccessToken($json) {
+        if(isset($json->error)) {
+            throw new \Exception($json->error);
+        } elseif(isset($json->Errors)) {
+            throw new \Exception(print_r($json->Errors, true));
+        }
+
         $_SESSION['access_token'] = $json->access_token;
         $_SESSION['refresh'] = $json->refresh_token;
 
@@ -189,8 +212,13 @@ class AccountRightV2 {
         return $json;
     }
 
+    /**
+     * Gets the Access Token for MYOB from Sessions
+     *
+     * @return bool
+     */
     public function retriveAccessToken() {
-        if(isset($_SESSION['access_token']) && isset($_SESSION['uid'])) {
+        if(isset($_SESSION['access_token'])) {
             $currentDate = new \DateTime('NOW');
 
             if($_SESSION['expires'] < $currentDate) {
@@ -209,6 +237,11 @@ class AccountRightV2 {
         throw new \Exception('Error: retriveAccessToken() - Session invalid.');
     }
 
+    /**
+     * Gets the Company File and sets the guid
+     *
+     * @return bool
+     */
     public function getCompanyFile($int) {
         $_SESSION['guid'] = null;
         unset($_SESSION['guid']);
@@ -227,10 +260,20 @@ class AccountRightV2 {
         throw new \Exception('Error: getCompanyFile() - Cannot find company file.');
     }
 
+    /**
+     * Returns the GUID
+     *
+     * @return string
+     */
     public function getGuid() {
         return $this->_guid;
     }
 
+    /**
+     * Makes curl requests to MYOB for core authentication actions
+     *
+     * @return json object
+     */
     private function _makeRequest($url, $params) {
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $url);
@@ -244,12 +287,16 @@ class AccountRightV2 {
 
         curl_close($ch);
 
-        return $response;
+        return json_decode($response);
     }
 
-    private function _makeGetRequest($function = '') {
+    /**
+     * Makes curl requests to MYOB for most actions
+     *
+     * @return json object or string
+     */
+    private function _doCurl($function = '', $method = self::GET, $data = array()) {
         $url = 'https://api.myob.com/accountright/';
-
         $headers = array(
             'Authorization: Bearer '.$this->_accesstoken,
             'x-myobapi-key: '.$this->_apikey,
@@ -265,40 +312,93 @@ class AccountRightV2 {
         $url.= $function;
 
         $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url);
+        
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
         curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 20);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_VERBOSE, true);
+        curl_setopt($ch, CURLOPT_HEADER, true);
+
+        if($method == self::POST) {
+            curl_setopt($ch, CURLOPT_POST, true);
+            
+            $data_string = json_encode($data);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $data_string);
+
+            array_push($headers, 'Content-Type: application/json');
+            array_push($headers, 'Content-Length: '.strlen($data_string));
+
+            curl_setopt($ch, CURLOPT_HTTPHEADER, $headers); 
+        } elseif($method == self::GET) {
+            if(is_array($data) && !empty($data)) {
+                $url.='?json='.urlencode(json_encode($data));
+            } elseif(!is_array($data) && strlen($data) > 0) {
+                $url.='/?'.$data;
+            }            
+        }
+
+        curl_setopt($ch, CURLOPT_URL, $url);
 
         $jsonData = curl_exec($ch);
 
+        $header_size = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+        $header = substr($jsonData, 0, $header_size);
+        $body = substr($jsonData, $header_size);
+
+        $this->_location = '';
+
+        if(preg_match('/Location: '.str_replace('/', '\/', $url).'\/(([a-zA-Z0-9]{8})-([a-z0-9]{4})-([a-z0-9]{4})-([a-z0-9]{4})-([a-z0-9]{12}))/i', $header, $pregs)) {
+            if(isset($pregs[1])) {
+                $this->_location = $pregs[1];
+            }
+        }
+
+        
         curl_close($ch);
 
-        $json = json_decode($jsonData);
+        if($this->isJson($body)) {
+            $json = json_decode($body);
 
-        return $json;
+            return $json;
+        } else {
+            return $body;
+        }
     }
 
-    /** Sale **/
-    public function SaleCustomerPayment() {
-        
+    /**
+     * Makes GET curl requests to MYOB for most actions
+     *
+     * @return json object or string
+     */
+    private function _makeGetRequest($function = '', $data = array()) {
+        return $this->_doCurl($function, self::GET, $data);
     }
 
-    public function SaleCustomerPaymentCalculateDiscountsFees() {
-        
+    /**
+     * Makes POST curl requests to MYOB for most actions
+     *
+     * @return json object or string
+     */
+    private function _makePostRequest($function = '', $data) {
+        return $this->_doCurl($function, self::POST, $data);
     }
 
-    public function SaleCustomerPaymentRecordWithDiscountsAndFees() {
-        
+    /**
+     * Checks if a string is JSON or something else
+     *
+     * @return bool
+     */
+    private function isJson($string) {
+        json_decode($string);
+
+        return (json_last_error() == JSON_ERROR_NONE);
     }
 
-    public function SaleCreditRefund() {
-        
-    }
-
-    public function SaleCreditSettlement() {
-        
+    /**
+     *  @return string
+     */ 
+    public function getLocation() {
+        return $this->_location;
     }
 
     /**
@@ -317,8 +417,8 @@ class AccountRightV2 {
      *  
      *  @return json      
      */
-    public function Contact() {
-        return $this->_makeGetRequest('Contact');
+    public function Contact($data = array()) {
+        return $this->_makeGetRequest('Contact', $data);
     }
 
     /**
@@ -327,8 +427,12 @@ class AccountRightV2 {
      *  
      *  @return json      
      */
-    public function ContactCustomer() {
-        return $this->_makeGetRequest('Contact/Customer');
+    public function ContactCustomer($json = array()) {
+        if(!empty($json)) {
+            return $this->_makePostRequest('Contact/Customer', $json);    
+        } else {
+            return $this->_makeGetRequest('Contact/Customer');    
+        }        
     }
 
     /**
@@ -342,64 +446,34 @@ class AccountRightV2 {
     }
 
     /**
-     *  Return, update, create and delete item type sale invoices for an AccountRight company file
+     *  Returns all item type sale invoices for an AccountRight company file
      *  http://developer.myob.com/api/accountright/v2/sale/invoice/invoice_item/
-     *
-     *  @return json
+     *  
+     *  @return json      
      */
-    public function SaleInvoiceItem($method = self::POST, $uid, $date, $customer, $lines, $rowVersion = '') {
-        //GET
-        //PUT
-        //POST
-        //DELETE
-        $this->_makeGetRequest('Sale/Invoice/Item');
+    public function GetSaleInvoiceItem($json) {
+        return $this->_makeGetRequest('Sale/Invoice/Item', $json);
     }
 
-    public function SaleInvoiceService() {
-        
+    /**
+     *  Returns all item type sale invoices for an AccountRight company file
+     *  http://developer.myob.com/api/accountright/v2/sale/invoice/invoice_item/
+     *  
+     *  @return json      
+     */
+    public function PostSaleInvoiceItem($json) {
+        return $this->_makePostRequest('Sale/Invoice/Item', $json);
     }
 
-    public function SaleInvoiceProfessional() {
-        
-    }
+    /**
+     *  Returns item type sale invoices for an AccountRight company file
+     *  http://developer.myob.com/api/accountright/v2/sale/invoice/
+     *  
+     *  @return json      
+     */
+    public function SaveInvoiceItemGet($uid) {
+        $json = array('UID' => $uid);
 
-    public function SaleInvoiceTimeBilling() {
-        
-    }
-
-    public function SaleInvoiceMiscellaneous() {
-        
-    }
-
-    public function SaleInvoiceRenderAsPDF() {
-        
-    }
-
-    public function SaleOrder() {
-        
-    }
-
-    public function SaleOrderItem() {
-        
-    }
-
-    public function SaleOrderService() {
-        
-    }
-
-    public function SaleOrderProfessional() {
-        
-    }
-
-    public function SaleOrderTimeBilling() {
-        
-    }
-
-    public function SaleOrderMiscellaneous() {
-        
-    }
-
-    public function SaleOrderRenderAsPDF() {
-
+        return $this->_makeGetRequest('Sale/Invoice/Item', $json);
     }
 }
