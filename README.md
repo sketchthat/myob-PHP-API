@@ -22,3 +22,7 @@ $ composer require sketchthat/myob-PHP-API
 ### Examples
 
 Provided in the [examples](https://github.com/sketchthat/myob-PHP-API/tree/master/example) folder.
+
+### Expand & Contribute
+
+This class is very small and is not finalised for production use. If you want to contribute to the class please make a pull request and I'll be happy to merge.
